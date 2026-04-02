@@ -1,0 +1,179 @@
+# Podcast Generator — Architecture
+
+## System Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    React Frontend (Vite)                      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────┐  │
+│  │  Upload   │ │ Generate │ │ Preview  │ │    Publish    │  │
+│  │  Docs     │ │ Progress │ │ + Player │ │  to Podbean   │  │
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────┬────────┘  │
+│       │ REST        │ WS/Poll    │ REST          │ REST      │
+└───────┼─────────────┼────────────┼───────────────┼──────────┘
+        │             │            │               │
+┌───────┼─────────────┼────────────┼───────────────┼──────────┐
+│       ▼             ▼            ▼               ▼          │
+│              FastAPI Backend (Python)                         │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │                   API Routes                         │    │
+│  │  /api/documents  /api/podcasts  /api/providers       │    │
+│  │  /api/ws/jobs    /api/podcasts/{id}/publish          │    │
+│  └──────────────────────┬──────────────────────────────┘    │
+│                         │                                    │
+│  ┌──────────────────────▼──────────────────────────────┐    │
+│  │              Pipeline Orchestrator                    │    │
+│  │  pipeline.py — runs as asyncio background task       │    │
+│  └──┬────────┬────────────┬─────────────┬──────────────┘    │
+│     │        │            │             │                    │
+│     ▼        ▼            ▼             ▼                    │
+│  ┌──────┐ ┌──────────┐ ┌─────────┐ ┌──────────┐           │
+│  │Parse │ │ Script   │ │  TTS    │ │ Assemble │           │
+│  │Docs  │ │ Provider │ │Provider │ │  Audio   │           │
+│  └──────┘ └──────────┘ └─────────┘ └──────────┘           │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              Provider Registry                       │    │
+│  │  gemini_full  │  claude_gemini  │  claude_elevenlabs │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  ┌──────────┐  ┌──────────────┐  ┌────────────────┐        │
+│  │  SQLite  │  │  File System │  │  Podbean API   │        │
+│  │ (models) │  │ (audio/docs) │  │  (publishing)  │        │
+│  └──────────┘  └──────────────┘  └────────────────┘        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Generation Pipeline
+
+```
+ ┌──────────────┐
+ │  User clicks │
+ │  "Generate"  │
+ └──────┬───────┘
+        │ POST /api/podcasts/generate
+        ▼
+ ┌──────────────┐     Returns job_id immediately (HTTP 202)
+ │ Create Job   │────────────────────────────────────────────► Frontend
+ │ + Podcast    │                                               starts
+ └──────┬───────┘                                               polling
+        │ asyncio.create_task
+        ▼
+ ┌──────────────┐
+ │  STAGE 1:    │  Extract text from uploaded PDFs/TXT/MD
+ │  Parse Docs  │  using PyMuPDF
+ │  (10-20%)    │
+ └──────┬───────┘
+        ▼
+ ┌──────────────┐
+ │  STAGE 2:    │  Send document text + speaker config to LLM
+ │  Generate    │  ┌─────────────────────────────────────┐
+ │  Script      │  │ Gemini Full → Gemini 2.5 Pro        │
+ │  (25-50%)    │  │ Claude+*   → Claude (Anthropic API) │
+ └──────┬───────┘  └─────────────────────────────────────┘
+        │            Returns structured JSON: [{speaker, text}, ...]
+        ▼
+ ┌──────────────┐
+ │  Generate    │  LLM summarizes the script in ≤300 characters
+ │  Summary     │
+ └──────┬───────┘
+        ▼
+ ┌──────────────┐
+ │  STAGE 3:    │  Convert script lines to audio
+ │  Generate    │  ┌──────────────────────────────────────────┐
+ │  Audio       │  │ Gemini TTS: multi-speaker (2 voices),    │
+ │  (55-80%)    │  │   chunks at ~580s, PCM→MP3 via lameenc   │
+ │              │  │ ElevenLabs: per-line TTS, async parallel  │
+ └──────┬───────┘  └──────────────────────────────────────────┘
+        ▼
+ ┌──────────────┐
+ │  STAGE 4:    │  Single segment → write directly
+ │  Assemble    │  Multiple segments → concatenate (WAV or MP3)
+ │  (85%)       │  Output: .mp3 file
+ └──────┬───────┘
+        ▼
+ ┌──────────────┐
+ │  COMPLETED   │  Audio path + duration saved to DB
+ │  (100%)      │  Frontend redirects to Preview page
+ └──────────────┘
+```
+
+## Provider Abstraction
+
+```
+                    ┌─────────────────┐
+                    │  ScriptProvider  │  (ABC)
+                    │  generate_script │
+                    └────────┬────────┘
+                    ┌────────┴────────┐
+                    ▼                 ▼
+          ┌─────────────────┐ ┌──────────────────┐
+          │ GeminiScript    │ │ ClaudeScript     │
+          │ Provider        │ │ Provider         │
+          │ (google-genai)  │ │ (anthropic SDK)  │
+          └─────────────────┘ └──────────────────┘
+
+                    ┌─────────────────┐
+                    │   TTSProvider   │  (ABC)
+                    │   synthesize    │
+                    │   list_voices   │
+                    └────────┬────────┘
+                    ┌────────┴────────┐
+                    ▼                 ▼
+          ┌─────────────────┐ ┌──────────────────┐
+          │ GeminiTTS       │ │ ElevenLabsTTS    │
+          │ Provider        │ │ Provider         │
+          │ - 2-voice multi │ │ - per-line calls │
+          │ - PCM→MP3       │ │ - async parallel │
+          │ - auto-chunking │ │ - rate limiting  │
+          └─────────────────┘ └──────────────────┘
+
+  Registry combines them into pipelines:
+  ┌─────────────────┬──────────────────┬───────────────────┐
+  │  gemini_full    │  claude_gemini   │  claude_elevenlabs │
+  │  Gemini+Gemini  │  Claude+Gemini   │  Claude+ElevenLabs │
+  └─────────────────┴──────────────────┴───────────────────┘
+```
+
+## Podbean Publishing Flow
+
+```
+  User clicks "Upload to Podbean"
+        │
+        ▼
+  ┌──────────────────┐
+  │ OAuth2 Token     │  POST /v1/oauth/token
+  │ (client_creds)   │  cached + auto-refresh
+  └──────┬───────────┘
+        ▼
+  ┌──────────────────┐
+  │ Authorize Upload │  GET /v1/files/uploadAuthorize
+  │                  │  → presigned_url + file_key
+  └──────┬───────────┘
+        ▼
+  ┌──────────────────┐
+  │ Upload MP3       │  PUT to presigned_url
+  └──────┬───────────┘
+        ▼
+  ┌──────────────────┐
+  │ Create Episode   │  POST /v1/episodes
+  │                  │  status: "draft" (default) or "publish"
+  └──────┬───────────┘
+        ▼
+  Episode appears in Podbean dashboard
+  (as draft for review, or published immediately)
+```
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `backend/app/main.py` | FastAPI app, CORS, router setup |
+| `backend/app/config.py` | All settings (model names, API keys) |
+| `backend/app/services/pipeline.py` | Pipeline orchestrator |
+| `backend/app/providers/base.py` | ScriptProvider + TTSProvider ABCs |
+| `backend/app/providers/registry.py` | Provider pipeline combinations |
+| `backend/app/providers/gemini_tts.py` | Gemini multi-speaker TTS + chunking |
+| `backend/app/services/podbean_service.py` | Podbean OAuth + upload |
+| `backend/app/services/job_manager.py` | Async job state + WebSocket notifications |
+| `frontend/src/hooks/useGenerationStatus.ts` | Real-time progress (WS + polling) |

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Podcast Generator — Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a2e; padding: 40px 20px; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+  h1 span { color: #6366f1; }
+  .subtitle { color: #64748b; font-size: 16px; margin-bottom: 40px; }
+  h2 { font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #1e293b; }
+  .section { margin-bottom: 48px; }
+
+  /* System Overview */
+  .overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card h3 { font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6366f1; margin-bottom: 12px; }
+  .card ul { list-style: none; }
+  .card li { padding: 6px 0; font-size: 14px; color: #475569; border-bottom: 1px solid #f1f5f9; }
+  .card li:last-child { border-bottom: none; }
+  .card li code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #6366f1; }
+
+  /* Pipeline */
+  .pipeline { display: flex; flex-direction: column; gap: 0; align-items: center; }
+  .stage { background: #fff; border-radius: 12px; padding: 20px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); width: 100%; max-width: 700px; position: relative; }
+  .stage .number { position: absolute; left: -12px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; }
+  .stage .title { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
+  .stage .desc { font-size: 14px; color: #64748b; }
+  .stage .detail { font-size: 13px; color: #94a3b8; margin-top: 6px; }
+  .stage .progress { font-size: 12px; color: #a5b4fc; font-weight: 600; float: right; margin-top: -20px; }
+  .arrow { width: 2px; height: 28px; background: #c7d2fe; margin: 0 auto; }
+  .s1 .number { background: #3b82f6; }
+  .s2 .number { background: #8b5cf6; }
+  .s3 .number { background: #6366f1; }
+  .s4 .number { background: #a855f7; }
+  .s5 .number { background: #22c55e; }
+
+  /* Providers */
+  .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .provider-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); text-align: center; }
+  .provider-card .name { font-weight: 600; font-size: 16px; margin-bottom: 8px; }
+  .provider-card .engines { display: flex; flex-direction: column; gap: 6px; }
+  .provider-card .engine { font-size: 13px; padding: 6px 12px; border-radius: 6px; }
+  .engine.script { background: #ede9fe; color: #6d28d9; }
+  .engine.tts { background: #dbeafe; color: #1d4ed8; }
+
+  .abc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .abc-card { background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 16px; text-align: center; }
+  .abc-card .abc-name { font-weight: 700; font-size: 15px; color: #6366f1; }
+  .abc-card .abc-methods { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+  /* Podbean */
+  .podbean-flow { display: flex; align-items: center; gap: 0; flex-wrap: wrap; justify-content: center; }
+  .pb-step { background: #fff; border-radius: 10px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); text-align: center; min-width: 160px; }
+  .pb-step .step-num { font-size: 11px; font-weight: 700; color: #22c55e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pb-step .step-title { font-weight: 600; font-size: 14px; margin: 4px 0; }
+  .pb-step .step-detail { font-size: 12px; color: #94a3b8; }
+  .pb-arrow { font-size: 24px; color: #22c55e; padding: 0 8px; }
+
+  /* Files */
+  table { width: 100%; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  th { background: #f8fafc; text-align: left; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 10px 16px; font-size: 14px; border-top: 1px solid #f1f5f9; }
+  td code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #6366f1; }
+  td:last-child { color: #475569; }
+
+  /* Tech Stack Badges */
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 32px; }
+  .badge { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+  .badge.py { background: #fef3c7; color: #92400e; }
+  .badge.react { background: #dbeafe; color: #1e40af; }
+  .badge.gemini { background: #ede9fe; color: #5b21b6; }
+  .badge.claude { background: #fce7f3; color: #9d174d; }
+  .badge.eleven { background: #d1fae5; color: #065f46; }
+  .badge.podbean { background: #fee2e2; color: #991b1b; }
+
+  @media (max-width: 768px) {
+    .overview-grid, .providers, .abc-row { grid-template-columns: 1fr; }
+    .podbean-flow { flex-direction: column; }
+    .pb-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Podcast <span>Generator</span></h1>
+  <p class="subtitle">Document-to-podcast platform with AI-powered script generation, multi-speaker TTS, and Podbean publishing</p>
+
+  <div class="badges">
+    <span class="badge py">Python / FastAPI</span>
+    <span class="badge react">React / TypeScript</span>
+    <span class="badge gemini">Gemini 2.5</span>
+    <span class="badge claude">Claude</span>
+    <span class="badge eleven">ElevenLabs</span>
+    <span class="badge podbean">Podbean</span>
+  </div>
+
+  <!-- System Overview -->
+  <div class="section">
+    <h2>System Overview</h2>
+    <div class="overview-grid">
+      <div class="card">
+        <h3>Frontend (React + Vite)</h3>
+        <ul>
+          <li><code>HomePage</code> Upload docs, configure speakers, select provider</li>
+          <li><code>GenerationPage</code> Real-time progress via WebSocket / polling</li>
+          <li><code>PreviewPage</code> Audio player, summary, publish to Podbean</li>
+          <li><code>HistoryPage</code> List of all generated podcasts</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Backend (FastAPI + SQLite)</h3>
+        <ul>
+          <li><code>POST /api/documents/upload</code> PDF/TXT/MD parsing</li>
+          <li><code>POST /api/podcasts/generate</code> Async pipeline (HTTP 202)</li>
+          <li><code>WS /api/ws/jobs/{id}</code> Real-time job status</li>
+          <li><code>GET /api/podcasts/{id}/audio</code> Stream MP3</li>
+          <li><code>POST /api/podcasts/{id}/publish</code> Podbean upload</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Storage</h3>
+        <ul>
+          <li><code>SQLite</code> Podcast metadata, documents, job state</li>
+          <li><code>./uploads/</code> Uploaded document files</li>
+          <li><code>./output/</code> Generated MP3 audio files</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>External APIs</h3>
+        <ul>
+          <li><code>Gemini 2.5 Pro</code> Script generation</li>
+          <li><code>Gemini 2.5 Flash TTS</code> Multi-speaker voice synthesis</li>
+          <li><code>Claude (Anthropic)</code> Script generation (alt provider)</li>
+          <li><code>ElevenLabs</code> Premium voice synthesis (alt provider)</li>
+          <li><code>Podbean API</code> OAuth2, upload, episode creation</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generation Pipeline -->
+  <div class="section">
+    <h2>Generation Pipeline</h2>
+    <div class="pipeline">
+
+      <div class="stage s1">
+        <div class="number">1</div>
+        <div class="progress">10–20%</div>
+        <div class="title">Parse Documents</div>
+        <div class="desc">Extract text from uploaded PDFs (PyMuPDF), TXT, and MD files</div>
+        <div class="detail">Concatenate all documents with separators</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="stage s2">
+        <div class="number">2</div>
+        <div class="progress">25–50%</div>
+        <div class="title">Generate Script</div>
+        <div class="desc">LLM creates a natural podcast dialogue between configured speakers</div>
+        <div class="detail">Output: structured JSON — [{speaker, text}, ...] + summary (≤300 chars)</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="stage s3">
+        <div class="number">3</div>
+        <div class="progress">55–80%</div>
+        <div class="title">Generate Audio</div>
+        <div class="desc">TTS provider converts script to multi-speaker audio</div>
+        <div class="detail">Gemini: native 2-voice, auto-chunks at ~580s, PCM→MP3 &nbsp;|&nbsp; ElevenLabs: per-line, async parallel</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="stage s4">
+        <div class="number">4</div>
+        <div class="progress">85%</div>
+        <div class="title">Assemble Audio</div>
+        <div class="desc">Single segment → write directly &nbsp;|&nbsp; Multiple → concatenate</div>
+        <div class="detail">Output: MP3 file ready for playback and Podbean upload</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="stage s5">
+        <div class="number">✓</div>
+        <div class="progress">100%</div>
+        <div class="title">Complete</div>
+        <div class="desc">Audio path + duration saved to DB. Frontend redirects to preview page.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Provider Abstraction -->
+  <div class="section">
+    <h2>Provider Abstraction</h2>
+
+    <div class="abc-row">
+      <div class="abc-card">
+        <div class="abc-name">ScriptProvider (ABC)</div>
+        <div class="abc-methods">generate_script(document_text, speakers) → Script</div>
+      </div>
+      <div class="abc-card">
+        <div class="abc-name">TTSProvider (ABC)</div>
+        <div class="abc-methods">synthesize(lines, voice_map) → AudioSegment[]</div>
+      </div>
+    </div>
+
+    <div class="providers">
+      <div class="provider-card">
+        <div class="name">Gemini Full</div>
+        <div class="engines">
+          <div class="engine script">Script: Gemini 2.5 Pro</div>
+          <div class="engine tts">TTS: Gemini Flash TTS</div>
+        </div>
+      </div>
+      <div class="provider-card">
+        <div class="name">Claude + Gemini TTS</div>
+        <div class="engines">
+          <div class="engine script">Script: Claude (Anthropic)</div>
+          <div class="engine tts">TTS: Gemini Flash TTS</div>
+        </div>
+      </div>
+      <div class="provider-card">
+        <div class="name">Claude + ElevenLabs</div>
+        <div class="engines">
+          <div class="engine script">Script: Claude (Anthropic)</div>
+          <div class="engine tts">TTS: ElevenLabs</div>
+        </div>
+      </div>
+    </div>
+    <p style="text-align:center; font-size:13px; color:#94a3b8; margin-top:12px;">
+      Adding a new provider = implement ABC + add one entry to <code style="background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:12px;">registry.py</code>
+    </p>
+  </div>
+
+  <!-- Podbean Flow -->
+  <div class="section">
+    <h2>Podbean Publishing Flow</h2>
+    <div class="podbean-flow">
+      <div class="pb-step">
+        <div class="step-num">Step 1</div>
+        <div class="step-title">OAuth Token</div>
+        <div class="step-detail">client_credentials grant<br>cached + auto-refresh</div>
+      </div>
+      <div class="pb-arrow">→</div>
+      <div class="pb-step">
+        <div class="step-num">Step 2</div>
+        <div class="step-title">Authorize Upload</div>
+        <div class="step-detail">GET /v1/files/uploadAuthorize<br>→ presigned URL + file_key</div>
+      </div>
+      <div class="pb-arrow">→</div>
+      <div class="pb-step">
+        <div class="step-num">Step 3</div>
+        <div class="step-title">Upload MP3</div>
+        <div class="step-detail">PUT to presigned URL</div>
+      </div>
+      <div class="pb-arrow">→</div>
+      <div class="pb-step">
+        <div class="step-num">Step 4</div>
+        <div class="step-title">Create Episode</div>
+        <div class="step-detail">POST /v1/episodes<br>default: draft mode</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key Files -->
+  <div class="section">
+    <h2>Key Files</h2>
+    <table>
+      <thead>
+        <tr><th>File</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>backend/app/main.py</code></td><td>FastAPI app, CORS, router setup, startup</td></tr>
+        <tr><td><code>backend/app/config.py</code></td><td>All settings — model names, API keys (configurable via .env)</td></tr>
+        <tr><td><code>backend/app/services/pipeline.py</code></td><td>Pipeline orchestrator — parse → script → summary → TTS → assemble</td></tr>
+        <tr><td><code>backend/app/providers/base.py</code></td><td>ScriptProvider + TTSProvider abstract base classes</td></tr>
+        <tr><td><code>backend/app/providers/registry.py</code></td><td>Maps provider IDs to (ScriptProvider, TTSProvider) pairs</td></tr>
+        <tr><td><code>backend/app/providers/gemini_tts.py</code></td><td>Gemini multi-speaker TTS with chunking + PCM→MP3</td></tr>
+        <tr><td><code>backend/app/providers/gemini_script.py</code></td><td>Gemini script generation</td></tr>
+        <tr><td><code>backend/app/providers/claude_script.py</code></td><td>Claude script generation</td></tr>
+        <tr><td><code>backend/app/providers/elevenlabs_tts.py</code></td><td>ElevenLabs per-line TTS with async concurrency</td></tr>
+        <tr><td><code>backend/app/services/podbean_service.py</code></td><td>Podbean OAuth + presigned upload + episode creation</td></tr>
+        <tr><td><code>backend/app/services/job_manager.py</code></td><td>In-memory job state + WebSocket notifications</td></tr>
+        <tr><td><code>frontend/src/hooks/useGenerationStatus.ts</code></td><td>Real-time progress hook (WebSocket + polling fallback)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>
