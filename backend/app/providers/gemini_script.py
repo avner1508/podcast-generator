@@ -1,9 +1,16 @@
+import asyncio
 import json
+import logging
 
 from google import genai
 
 from app.config import settings
 from app.providers.base import Script, ScriptLine, ScriptProvider
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 4
+RETRY_BASE_DELAY = 5  # seconds
 
 SYSTEM_PROMPT = """You are a podcast script writer. Given document content, create an engaging,
 natural-sounding podcast conversation between the specified speakers.
@@ -47,16 +54,28 @@ class GeminiScriptProvider(ScriptProvider):
 Document content:
 {document_text[:100000]}"""
 
-        response = self._client.models.generate_content(
-            model=settings.gemini_script_model,
-            contents=user_prompt,
-            config=genai.types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.9,
-                response_mime_type="application/json",
-            ),
-        )
-
-        data = json.loads(response.text)
-        lines = [ScriptLine(speaker=line["speaker"], text=line["text"]) for line in data["lines"]]
-        return Script(lines=lines)
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = self._client.models.generate_content(
+                    model=settings.gemini_script_model,
+                    contents=user_prompt,
+                    config=genai.types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        temperature=0.9,
+                        response_mime_type="application/json",
+                    ),
+                )
+                data = json.loads(response.text)
+                lines = [ScriptLine(speaker=line["speaker"], text=line["text"]) for line in data["lines"]]
+                return Script(lines=lines)
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                if "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                    delay = RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(f"Gemini script model unavailable (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_error
