@@ -10,7 +10,7 @@ export default function PublishButton({ podcastId, alreadyPublished }: Props) {
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState(alreadyPublished);
   const [error, setError] = useState<string | null>(null);
-  const [description, setDescription] = useState('');
+  const [description] = useState('');
   const [asDraft, setAsDraft] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
@@ -30,8 +30,16 @@ export default function PublishButton({ podcastId, alreadyPublished }: Props) {
 
   if (published) {
     return (
-      <div className="bg-green-50 border border-green-200 rounded p-4 text-green-700">
-        Uploaded to Podbean as {asDraft ? 'draft' : 'published'}
+      <div className="bg-green-50 border border-green-200 rounded p-4 text-green-700 flex items-center justify-between">
+        <span>Uploaded to Podbean as {asDraft ? 'draft' : 'published'}</span>
+        <a
+          href="https://admin5.podbean.com/bboazst/episodes/list"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 whitespace-nowrap ml-4"
+        >
+          View Episodes ↗
+        </a>
       </div>
     );
   }
@@ -50,12 +58,6 @@ export default function PublishButton({ podcastId, alreadyPublished }: Props) {
   return (
     <div className="space-y-3 bg-white border rounded-lg p-4">
       <h3 className="font-medium text-gray-900">Upload to Podbean</h3>
-      <textarea
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder="Episode description (optional)"
-        className="w-full px-3 py-2 border rounded text-sm h-24"
-      />
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input
           type="checkbox"
