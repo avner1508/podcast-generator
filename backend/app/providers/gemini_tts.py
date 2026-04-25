@@ -1,4 +1,6 @@
+import asyncio
 import io
+import logging
 import wave
 
 import lameenc
@@ -7,6 +9,11 @@ from google.genai import types
 
 from app.config import settings
 from app.providers.base import AudioSegment, ScriptLine, TTSProvider
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 4
+RETRY_BASE_DELAY = 5  # seconds
 
 GEMINI_VOICES = [
     {"id": "Kore", "name": "Kore", "gender": "female"},
@@ -139,14 +146,29 @@ class GeminiTTSProvider(TTSProvider):
                     )
                 )
 
-            response = self._client.models.generate_content(
-                model=settings.gemini_tts_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=speech_config,
-                ),
-            )
+            last_error = None
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = self._client.models.generate_content(
+                        model=settings.gemini_tts_model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["AUDIO"],
+                            speech_config=speech_config,
+                        ),
+                    )
+                    break
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e)
+                    if "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                        delay = RETRY_BASE_DELAY * (2 ** attempt)
+                        logger.warning(f"Gemini TTS model unavailable (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay}s: {e}")
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+            else:
+                raise last_error
 
             audio_data = response.candidates[0].content.parts[0].inline_data.data
             mp3_bytes = _pcm_to_mp3(audio_data, sample_rate=24000)

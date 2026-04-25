@@ -26,7 +26,7 @@ async def publish_podcast(podcast_id: str, request: PublishRequest):
         episode_id = await podbean_service.publish_episode(
             audio_path=podcast.audio_path,
             title=podcast.title,
-            description=request.description or podcast.title,
+            description=request.description or podcast.summary or podcast.title,
             as_draft=request.as_draft,
         )
     except Exception as e:
